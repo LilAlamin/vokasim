@@ -1,7 +1,7 @@
 document.addEventListener('alpine:init', () => {
     Alpine.data('interviewRecorder', (options) => {
-        let stream, audioRecorder, videoRecorder, peer, remoteAudio, clock, voiceTimeout;
-        let audioChunks = [], videoChunks = [], startedAt = 0, destroyed = false;
+        let stream, audioRecorder, videoRecorder, peer, remoteAudio, clock, voiceTimeout, speechRecognition;
+        let audioChunks = [], videoChunks = [], startedAt = 0, destroyed = false, browserTranscript = '';
         const clockOffset = options.serverNow - Date.now();
         return {
             remaining: Math.max(0, Math.ceil((options.deadline - options.serverNow) / 1000)),
@@ -48,6 +48,8 @@ document.addEventListener('alpine:init', () => {
                     }
                     audioRecorder.start(1000);
                     startedAt = Date.now();
+                    browserTranscript = '';
+                    this.startBrowserSpeechRecognition();
                     this.recording = true;
                     this.status = 'Mikrofon aktif. Tekan Selesai rekam setelah menjawab.';
                 } catch (error) {
@@ -60,6 +62,7 @@ document.addEventListener('alpine:init', () => {
                 this.busy = true; this.error = '';
                 try {
                     const duration = Math.max(0.1, Math.min(options.maxSeconds, (Date.now() - startedAt) / 1000));
+                    this.stopBrowserSpeechRecognition();
                     await Promise.all([audioRecorder, videoRecorder].filter(Boolean).map(recorder => new Promise(resolve => {
                         if (recorder.state === 'inactive') return resolve();
                         recorder.onstop = resolve; recorder.stop();
@@ -88,10 +91,18 @@ document.addEventListener('alpine:init', () => {
                     }
                     this.status = 'Membuat transkrip audio…';
                     const transcribed = await this.$wire.transcribe(options.questionId);
-                    this.status = transcribed ? 'Rekaman diunggah. Periksa transkrip, lalu kirim jawaban.' : 'Rekaman diunggah. Transkripsi belum berhasil; ketik jawaban atau coba transkripsikan ulang.';
+                    if (transcribed) {
+                        this.status = 'Rekaman diunggah. Periksa transkrip, lalu kirim jawaban.';
+                    } else if (browserTranscript.trim() !== '') {
+                        const existing = (this.$wire.get('answer_text') || '').trim();
+                        this.$wire.$set('answer_text', existing ? `${existing} ${browserTranscript.trim()}` : browserTranscript.trim());
+                        this.status = 'Rekaman diunggah dan ditranskripsikan melalui browser. Periksa transkrip, lalu kirim jawaban.';
+                    } else {
+                        this.status = 'Rekaman diunggah. Transkripsi belum berhasil; ketik jawaban atau coba transkripsikan ulang.';
+                    }
                 } catch (error) {
                     this.error = error.message === 'size' ? 'Rekaman melebihi 12 MB. Simpan salinan audio dan ketik jawaban untuk melanjutkan.' : 'Rekaman belum selesai diunggah atau ditranskripsikan. Simpan salinan audio, periksa pesan validasi, lalu ketik jawaban jika perlu.';
-                } finally { this.recording = false; this.busy = false; this.stopTracks(); }
+                } finally { this.stopBrowserSpeechRecognition(); this.recording = false; this.busy = false; this.stopTracks(); }
             },
             async submit() {
                 if (this.busy || this.recording || this.submitting || destroyed) return;
@@ -129,18 +140,71 @@ document.addEventListener('alpine:init', () => {
                     await peer.setRemoteDescription({ type: 'answer', sdp: await response.text() });
                     voiceTimeout = setTimeout(() => this.closeVoice(), 45000);
                 } catch {
-                    this.error = 'Suara AI belum tersedia. Pertanyaan tetap dapat dibaca di layar.';
                     this.closeVoice();
+                    this.speakFallback();
                 }
+            },
+            speakFallback() {
+                if (!('speechSynthesis' in window) || !options.questionText) {
+                    this.error = 'Suara AI belum tersedia. Pertanyaan tetap dapat dibaca di layar.';
+                    this.speaking = false;
+                    return;
+                }
+                try {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(options.questionText);
+                    utterance.lang = 'id-ID';
+                    utterance.rate = 0.98;
+                    const voices = window.speechSynthesis.getVoices();
+                    const idVoice = voices.find(v => v.lang?.toLowerCase().startsWith('id'));
+                    if (idVoice) utterance.voice = idVoice;
+                    this.speaking = true;
+                    utterance.onend = () => { this.speaking = false; };
+                    utterance.onerror = () => {
+                        this.speaking = false;
+                        this.error = 'Suara AI belum tersedia. Pertanyaan tetap dapat dibaca di layar.';
+                    };
+                    window.speechSynthesis.speak(utterance);
+                } catch {
+                    this.speaking = false;
+                    this.error = 'Suara AI belum tersedia. Pertanyaan tetap dapat dibaca di layar.';
+                }
+            },
+            startBrowserSpeechRecognition() {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) return;
+                try {
+                    speechRecognition = new SpeechRecognition();
+                    speechRecognition.lang = 'id-ID';
+                    speechRecognition.continuous = true;
+                    speechRecognition.interimResults = false;
+                    speechRecognition.onresult = (event) => {
+                        for (let i = event.resultIndex; i < event.results.length; i++) {
+                            if (event.results[i].isFinal) {
+                                browserTranscript = `${browserTranscript} ${event.results[i][0].transcript}`.trim();
+                            }
+                        }
+                    };
+                    speechRecognition.onerror = () => {};
+                    speechRecognition.start();
+                } catch {
+                    speechRecognition = null;
+                }
+            },
+            stopBrowserSpeechRecognition() {
+                if (!speechRecognition) return;
+                try { speechRecognition.stop(); } catch {}
+                speechRecognition = null;
             },
             closeVoice() {
                 clearTimeout(voiceTimeout); peer?.close(); peer = null;
                 if (remoteAudio) { remoteAudio.pause(); remoteAudio.srcObject = null; }
+                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
                 this.speaking = false;
             },
             stopTracks() { stream?.getTracks().forEach(track => track.stop()); },
             destroy() {
-                destroyed = true; clearInterval(clock); this.closeVoice();
+                destroyed = true; clearInterval(clock); this.closeVoice(); this.stopBrowserSpeechRecognition();
                 [audioRecorder, videoRecorder].filter(Boolean).forEach(recorder => { if (recorder.state !== 'inactive') recorder.stop(); });
                 this.stopTracks();
                 if (this.audioPreview) URL.revokeObjectURL(this.audioPreview);
