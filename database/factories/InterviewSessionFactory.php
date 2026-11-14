@@ -22,7 +22,7 @@ class InterviewSessionFactory extends Factory
     {
         return [
             'public_id' => (string) Str::uuid(),
-            'public_id' => (string) \Illuminate\Support\Str::uuid(),
+            'public_id' => (string) Str::uuid(),
             'student_id' => User::factory(), 'target_position' => 'Network Technician',
             'difficulty' => 'beginner', 'interview_type' => 'behavioral', 'interaction_mode' => 'text',
             'status' => InterviewStatus::Preparing, 'question_count' => 5, 'answer_seconds' => 180,

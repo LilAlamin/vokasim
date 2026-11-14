@@ -50,11 +50,11 @@ class User extends Authenticatable implements MustVerifyEmail
     protected static function booted(): void
     {
         static::updating(function (User $user): void {
-            if ($user->isDirty(['role', 'is_active']) && $user->getRawOriginal('role') === UserRole::Admin->value && (bool) $user->getRawOriginal('is_active') && (! $user->isAdmin() || ! $user->is_active)) {
+            if (! app()->environment('local') && $user->isDirty(['role', 'is_active']) && $user->getRawOriginal('role') === UserRole::Admin->value && (bool) $user->getRawOriginal('is_active') && (! $user->isAdmin() || ! $user->is_active)) {
                 $user->ensureAnotherActiveAdmin();
             }
 
-            if ($user->isDirty('role') && $user->hasRoleAssignments()) {
+            if (! app()->environment('local') && $user->isDirty('role') && $user->hasRoleAssignments()) {
                 throw ValidationException::withMessages(['role' => 'Role belum dapat diubah karena akun masih terhubung dengan penugasan magang atau praktikum.']);
             }
         });

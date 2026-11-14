@@ -2,19 +2,30 @@
     <div class="flex flex-col gap-6 w-full">
         <!-- Local Dev Role Preview Bar (Memudahkan pengujian tampilan tiap role) -->
         @if(app()->environment('local'))
-            <div class="flex flex-wrap items-center justify-between gap-3 p-3 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-3 p-3 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs shadow-xs">
                 <div class="flex items-center gap-2">
                     <span class="font-bold text-zinc-700 dark:text-zinc-300">Mode Pratinjau Role:</span>
-                    <span class="px-2 py-0.5 rounded font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-700">
+                    <flux:badge size="sm" :color="auth()->user()->role->badgeColor()">
                         {{ auth()->user()->role->label() }}
-                    </span>
+                    </flux:badge>
                 </div>
-                <div class="flex items-center gap-1.5">
+                <div class="flex flex-wrap items-center gap-1.5">
                     <span class="text-zinc-500 mr-1 hidden sm:inline">Uji Tampilan Role:</span>
                     @foreach (\App\Enums\UserRole::cases() as $previewRole)
+                        @php
+                            $isActive = auth()->user()->role === $previewRole;
+                        @endphp
                         <form method="POST" action="{{ route('switch-role', $previewRole->value) }}">
                             @csrf
-                            <flux:button size="sm" type="submit">{{ $previewRole->label() }}</flux:button>
+                            <flux:button 
+                                size="sm" 
+                                type="submit" 
+                                :variant="$isActive ? 'primary' : 'subtle'"
+                                :icon="$isActive ? 'check' : null"
+                                :class="$isActive ? 'pointer-events-none shadow-xs font-semibold' : 'text-zinc-700 dark:text-zinc-300'"
+                            >
+                                {{ $previewRole->label() }}
+                            </flux:button>
                         </form>
                     @endforeach
                 </div>
