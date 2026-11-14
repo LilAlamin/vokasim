@@ -1,17 +1,32 @@
 # ==========================================
-# Stage 1: Build Frontend Assets (Vite)
+# Stage 1: Install Composer Dependencies
 # ==========================================
-FROM node:22-alpine AS frontend
+FROM composer:2 AS composer_stage
+WORKDIR /app
+
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignore-platform-reqs
+
+COPY . .
+RUN composer dump-autoload --optimize --no-dev
+
+# ==========================================
+# Stage 2: Build Frontend Assets (Vite + Tailwind + Flux)
+# ==========================================
+FROM node:22-alpine AS frontend_stage
 WORKDIR /app
 
 COPY package*.json ./
 RUN npm install
 
 COPY . .
+# Copy vendor from Stage 1 because Flux UI requires flux.css inside vendor/
+COPY --from=composer_stage /app/vendor ./vendor
+
 RUN npm run build
 
 # ==========================================
-# Stage 2: Application Runtime (PHP 8.4 + Nginx)
+# Stage 3: Application Runtime (PHP 8.4 + Nginx)
 # ==========================================
 FROM php:8.4-fpm-alpine AS runtime
 
@@ -37,9 +52,6 @@ RUN docker-php-ext-install \
     opcache \
     pcntl
 
-# Install Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
-
 # Configure Nginx & Supervisor
 RUN mkdir -p /run/nginx /var/log/supervisor
 COPY docker/nginx.conf /etc/nginx/http.d/default.conf
@@ -51,11 +63,11 @@ WORKDIR /var/www/html
 # Copy application files
 COPY . .
 
-# Copy compiled frontend assets from Stage 1
-COPY --from=frontend /app/public/build ./public/build
+# Copy composer vendor from Stage 1
+COPY --from=composer_stage /app/vendor ./vendor
 
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader --no-interaction
+# Copy compiled frontend assets from Stage 2
+COPY --from=frontend_stage /app/public/build ./public/build
 
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
