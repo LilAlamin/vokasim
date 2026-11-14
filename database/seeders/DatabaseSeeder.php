@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
             IndustryOperationsSeeder::class,
             TracerSeeder::class,
             InterviewSessionSeeder::class,
+            UserRoleTestSeeder::class,
         ]);
     }
 }
