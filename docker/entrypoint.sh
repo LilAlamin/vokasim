@@ -33,7 +33,7 @@ chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/d
 
 # Run migrations
 echo "Running database migrations..."
-php artisan migrate --force --isolated || true
+php artisan migrate --force
 
 # Storage link
 php artisan storage:link --force || true
