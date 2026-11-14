@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\CertificateStatus;
+use App\Enums\InterviewStatus;
 use App\Enums\LogbookStatus;
 use App\Enums\UserRole;
 use App\Models\Certificate;
@@ -17,8 +18,10 @@ use App\Models\PortfolioProject;
 use App\Models\PracticumModule;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class UserRoleTestSeeder extends Seeder
 {
@@ -214,12 +217,13 @@ class UserRoleTestSeeder extends Seeder
         );
 
         // Presensi hari ini untuk Mahasiswa
-        InternshipAttendance::query()->firstOrCreate(
-            [
+        if (! InternshipAttendance::query()
+            ->where('internship_placement_id', $placement->id)
+            ->whereDate('work_date', now()->toDateString())
+            ->exists()) {
+            InternshipAttendance::query()->create([
                 'internship_placement_id' => $placement->id,
                 'work_date' => now()->toDateString(),
-            ],
-            [
                 'checked_in_at' => now()->setTime(8, 0),
                 'checked_out_at' => now()->setTime(17, 0),
                 'check_in_latitude' => -6.2088,
@@ -231,53 +235,56 @@ class UserRoleTestSeeder extends Seeder
                 'check_out_accuracy' => 10.0,
                 'check_out_distance' => 12.0,
                 'radius_meters' => 200,
-            ]
-        );
+            ]);
+        }
 
         // Logbook 1: Terverifikasi
-        InternshipLogbook::query()->firstOrCreate(
-            [
+        if (! InternshipLogbook::query()
+            ->where('internship_placement_id', $placement->id)
+            ->whereDate('work_date', now()->subDays(2)->toDateString())
+            ->exists()) {
+            InternshipLogbook::query()->create([
                 'internship_placement_id' => $placement->id,
                 'work_date' => now()->subDays(2)->toDateString(),
-            ],
-            [
                 'description' => 'Mengembangkan modul autentikasi dan integrasi single sign-on (SSO) pada portal mitra.',
                 'effective_minutes' => 480,
                 'status' => LogbookStatus::Verified,
                 'submitted_at' => now()->subDays(2)->setTime(17, 0),
                 'mentor_approved_at' => now()->subDays(2)->setTime(18, 0),
                 'verified_at' => now()->subDay()->setTime(10, 0),
-            ]
-        );
+            ]);
+        }
 
         // Logbook 2: Disetujui Mentor -> Menunggu Validasi Dosen
-        InternshipLogbook::query()->firstOrCreate(
-            [
+        if (! InternshipLogbook::query()
+            ->where('internship_placement_id', $placement->id)
+            ->whereDate('work_date', now()->subDay()->toDateString())
+            ->exists()) {
+            InternshipLogbook::query()->create([
                 'internship_placement_id' => $placement->id,
                 'work_date' => now()->subDay()->toDateString(),
-            ],
-            [
                 'description' => 'Menyusun unit testing dan API documentation menggunakan OpenAPI/Swagger untuk modul order.',
                 'effective_minutes' => 480,
                 'status' => LogbookStatus::MentorApproved,
                 'submitted_at' => now()->subDay()->setTime(17, 0),
                 'mentor_approved_at' => now()->subDay()->setTime(18, 30),
-            ]
-        );
+            ]);
+        }
 
         // Logbook 3: Diajukan Mahasiswa -> Menunggu Review Mentor DUDI
-        InternshipLogbook::query()->firstOrCreate(
-            [
+        if (! InternshipLogbook::query()
+            ->where('internship_placement_id', $placement->id)
+            ->whereDate('work_date', now()->toDateString())
+            ->exists()) {
+            InternshipLogbook::query()->create([
                 'internship_placement_id' => $placement->id,
                 'work_date' => now()->toDateString(),
-            ],
-            [
                 'description' => 'Refactoring database query untuk optimasi performa dashboard admin serta perbaikan bug relasi.',
                 'effective_minutes' => 480,
                 'status' => LogbookStatus::PendingMentor,
                 'submitted_at' => now()->setTime(16, 45),
-            ]
-        );
+            ]);
+        }
 
         // Pengajuan Izin Menunggu Review Mentor
         InternshipLeaveRequest::query()->firstOrCreate(
@@ -324,33 +331,66 @@ class UserRoleTestSeeder extends Seeder
 
         // 8. Sertifikat Mahasiswa
         if (! Certificate::query()->where('student_id', $mahasiswa->id)->exists()) {
-            Certificate::factory()->for($mahasiswa, 'student')->withFile()->create([
+            $cert1Path = 'certificates/demo/'.Str::uuid().'.encrypted';
+            Certificate::query()->create([
+                'student_id' => $mahasiswa->id,
                 'holder_name' => $mahasiswa->name,
                 'title' => 'Sertifikasi Kompetensi Pemrograman Web Enterprise (BNSP)',
                 'issuer' => 'LSP Informatika Nasional',
+                'credential_number' => 'KOMP-100001',
                 'skills' => ['php', 'laravel', 'sql', 'rest-api'],
+                'issued_on' => now()->subMonths(2)->toDateString(),
+                'expires_on' => now()->addYears(3)->toDateString(),
                 'status' => CertificateStatus::Verified,
                 'verified_at' => now()->subMonth(),
                 'verified_by' => $dosen->id,
+                'file_path' => $cert1Path,
+                'file_name' => 'sertifikat-bnsp.pdf',
+                'file_mime' => 'application/pdf',
+                'file_size' => 32,
+                'public_consent_at' => now(),
             ]);
+            Storage::disk('local')->put($cert1Path, Crypt::encryptString('%PDF-1.4 Sertifikat pengujian'));
 
-            Certificate::factory()->for($mahasiswa, 'student')->withFile()->create([
+            $cert2Path = 'certificates/demo/'.Str::uuid().'.encrypted';
+            Certificate::query()->create([
+                'student_id' => $mahasiswa->id,
                 'holder_name' => $mahasiswa->name,
                 'title' => 'Cloud Computing & Containerization Practitioner',
                 'issuer' => 'AWS Academy / Cloud Foundation',
+                'credential_number' => 'KOMP-100002',
                 'skills' => ['docker', 'aws', 'linux'],
+                'issued_on' => now()->subMonth()->toDateString(),
+                'expires_on' => now()->addYears(2)->toDateString(),
                 'status' => CertificateStatus::Pending,
+                'file_path' => $cert2Path,
+                'file_name' => 'sertifikat-cloud.pdf',
+                'file_mime' => 'application/pdf',
+                'file_size' => 32,
+                'public_consent_at' => now(),
             ]);
+            Storage::disk('local')->put($cert2Path, Crypt::encryptString('%PDF-1.4 Sertifikat pengujian'));
         }
 
         // 9. Simulasi Wawancara Mahasiswa
         if (! InterviewSession::query()->where('student_id', $mahasiswa->id)->exists()) {
-            InterviewSession::factory()->for($mahasiswa, 'student')->completed()->create([
+            InterviewSession::query()->create([
+                'public_id' => (string) Str::uuid(),
+                'student_id' => $mahasiswa->id,
                 'target_position' => 'Fullstack Web Engineer',
                 'difficulty' => 'intermediate',
                 'interview_type' => 'technical',
                 'interaction_mode' => 'text',
+                'status' => InterviewStatus::Completed,
                 'question_count' => 5,
+                'answer_seconds' => 180,
+                'use_context' => false,
+                'context_snapshot' => [],
+                'consented_at' => now(),
+                'started_at' => now()->subMinutes(20),
+                'completed_at' => now(),
+                'ai_model' => 'gpt-6-luna',
+                'retry_count' => 0,
                 'overall_score' => 86.5,
                 'star_score' => 88.0,
                 'technical_score' => 89.0,
