@@ -153,19 +153,26 @@ class AiInterviewClient
         return $response->body();
     }
 
+    private function isGemini(): bool
+    {
+        return str_contains(strtolower((string) config('interviews.base_url')), 'generativelanguage.googleapis.com');
+    }
+
     private function request(InterviewSession $session): PendingRequest
     {
         if (! $this->ready()) {
             throw new RuntimeException('Layanan AI belum diaktifkan. Hubungi administrator.');
         }
 
-        $headers = [
-            'OpenAI-Safety-Identifier' => $this->safetyIdentifier($session),
-            'User-Agent' => 'claude-cli/2.1.219 (external, sdk-cli)',
-            'x-app' => 'cli',
-            'anthropic-version' => '2023-06-01',
-            'anthropic-beta' => 'claude-code-20250219',
-        ];
+        $headers = $this->isGemini()
+            ? []
+            : [
+                'OpenAI-Safety-Identifier' => $this->safetyIdentifier($session),
+                'User-Agent' => 'claude-cli/2.1.219 (external, sdk-cli)',
+                'x-app' => 'cli',
+                'anthropic-version' => '2023-06-01',
+                'anthropic-beta' => 'claude-code-20250219',
+            ];
 
         return Http::baseUrl(rtrim((string) config('interviews.base_url'), '/'))
             ->withToken((string) config('interviews.api_key'))->acceptJson()
@@ -194,6 +201,10 @@ class AiInterviewClient
     private function structured(InterviewSession $session, string $name, array $schema, string $instructions, array $input): array
     {
         $encodedInput = json_encode($input, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        if ($this->isGemini()) {
+            return $this->structuredGemini($session, $name, $schema, $instructions, $encodedInput);
+        }
+
         $payload = [
             'model' => $session->ai_model, 'store' => false, 'max_output_tokens' => 9000,
             'safety_identifier' => $this->safetyIdentifier($session),
@@ -220,6 +231,42 @@ class AiInterviewClient
                 }
             }
         }
+        $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        if (! is_array($data)) {
+            throw new RuntimeException('Format jawaban AI tidak dapat diproses. Silakan coba lagi.');
+        }
+
+        return $data;
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @return array<string, mixed>
+     */
+    private function structuredGemini(InterviewSession $session, string $name, array $schema, string $instructions, string $encodedInput): array
+    {
+        $payload = [
+            'model' => $session->ai_model,
+            'messages' => [
+                ['role' => 'system', 'content' => $instructions."\n\n<input_data>\n".$encodedInput."\n</input_data>"],
+                ['role' => 'user', 'content' => 'Process the provided <input_data> and return the structured JSON response.'],
+            ],
+            'response_format' => [
+                'type' => 'json_schema',
+                'json_schema' => [
+                    'name' => $name,
+                    'strict' => true,
+                    'schema' => $schema,
+                ],
+            ],
+        ];
+
+        $response = $this->request($session)->post('/chat/completions', $payload);
+        $json = $response->json('choices.0.message.content');
+        if (! $response->successful() || ! is_string($json) || trim($json) === '') {
+            throw new RuntimeException('Layanan AI belum menyelesaikan permintaan. Silakan coba lagi.');
+        }
+
         $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
         if (! is_array($data)) {
             throw new RuntimeException('Format jawaban AI tidak dapat diproses. Silakan coba lagi.');

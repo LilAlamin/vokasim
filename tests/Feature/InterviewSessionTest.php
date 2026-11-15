@@ -329,3 +329,27 @@ test('retention cleanup removes old media while preserving recent recordings and
     Storage::disk('local')->assertExists($recent->audio_path);
     expect($old->fresh())->audio_path->toBeNull()->answer_text->not->toBeNull();
 });
+
+test('gemini openai-compatible base url uses chat completions endpoint for questions', function () {
+    config()->set('interviews.base_url', 'https://generativelanguage.googleapis.com/v1beta/openai');
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions' => Http::response([
+            'choices' => [[
+                'message' => [
+                    'content' => json_encode(generatedInterviewQuestions(), JSON_THROW_ON_ERROR),
+                ],
+            ]],
+        ]),
+    ]);
+
+    $session = InterviewSession::factory()->create(['ai_model' => 'gemini-2.5-flash']);
+    (new GenerateInterviewQuestions($session->id))->handle(app(AiInterviewClient::class));
+
+    expect($session->fresh())->status->toBe(InterviewStatus::Active);
+    expect($session->questions()->count())->toBe(5);
+    Http::assertSent(fn (Request $request) => $request->url() === 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+        && $request['model'] === 'gemini-2.5-flash'
+        && $request['response_format']['type'] === 'json_schema'
+        && ! $request->hasHeader('anthropic-version'));
+});
